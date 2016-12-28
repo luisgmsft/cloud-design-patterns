@@ -17,26 +17,27 @@ namespace PriorityQueue.Shared
         private readonly string topicName;
         private SubscriptionClient subscriptionClient;
         private TopicClient topicClient;
-        private ManualResetEvent pauseProcessingEvent;
 
         public QueueManager(string serviceBusConnectionString, string topicName)
         {
             this.serviceBusConnectionString = serviceBusConnectionString;
             this.topicName = topicName;
-            this.pauseProcessingEvent = new ManualResetEvent(true);
         }
 
-        public async Task SendMessageAsync(BrokeredMessage message)
-        {
-            await this.topicClient.SendAsync(message);
-        }
+        public async Task SendMessageAsync(BrokeredMessage message) => await this.topicClient.SendAsync(message).ConfigureAwait(false);
 
-        public async Task SendBatchAsync(IEnumerable<BrokeredMessage> messages)
-        {
-            await this.topicClient.SendBatchAsync(messages);
-        }
+        public async Task SendBatchAsync(IEnumerable<BrokeredMessage> messages) =>
+            await this.topicClient.SendBatchAsync(messages).ConfigureAwait(false);
 
-        public void ReceiveMessages(string subscription, Func<BrokeredMessage, Task> processMessageTask)
+        public async Task StopSenderAsync() => await this.topicClient.CloseAsync().ConfigureAwait(false);
+
+        private void OptionsOnExceptionReceived(object sender, ExceptionReceivedEventArgs exceptionReceivedEventArgs) =>
+            Trace.TraceError($"Exception in QueueClient.ExceptionReceived: {exceptionReceivedEventArgs?.Exception?.Message}");
+
+        public async Task SetupTopicAsync() => await this.SetupAsync(subscription: null, priority: null).ConfigureAwait(false);
+
+        public void ReceiveMessages(string subscription, Func<BrokeredMessage, Task> processMessageTask,
+            CancellationToken cancellationToken)
         {
             var options = new OnMessageOptions();
             options.AutoComplete = true;
@@ -46,46 +47,36 @@ namespace PriorityQueue.Shared
             this.subscriptionClient.OnMessageAsync(
                  async (msg) =>
                  {
-                     // Will block the current thread if Stop is called.
-                     this.pauseProcessingEvent.WaitOne();
-
-                     // Execute processing task here
-                     await processMessageTask(msg);
+                     if (!cancellationToken.IsCancellationRequested)
+                     {
+                         // Execute processing task here
+                         await processMessageTask(msg)
+                            .ConfigureAwait(false);
+                     }
                  },
                  options);
         }
 
-        public void Setup(string subscription, string priority)
+        public async Task SetupAsync(string subscription, string priority)
         {
             var namespaceManager = NamespaceManager.CreateFromConnectionString(this.serviceBusConnectionString);
 
             // Setup the topic.
-            if (!namespaceManager.TopicExists(this.topicName))
+            if (!await namespaceManager.TopicExistsAsync(this.topicName)
+                .ConfigureAwait(false))
             {
                 try
                 {
-                    namespaceManager.CreateTopic(this.topicName);
+                    await namespaceManager.CreateTopicAsync(this.topicName)
+                        .ConfigureAwait(false);
                 }
                 catch (MessagingEntityAlreadyExistsException)
                 {
-                    Trace.TraceInformation("Messaging entity already created: " + this.topicName);
+                    Trace.TraceInformation($"Messaging entity already created: {this.topicName}");
                 }
-                catch (MessagingException ex)
+                catch (MessagingException ex) when (((ex.InnerException as WebException)?.Response as HttpWebResponse)?.StatusCode == HttpStatusCode.Conflict)
                 {
-                    var webException = ex.InnerException as WebException;
-                    if (webException != null)
-                    {
-                        var response = webException.Response as HttpWebResponse;
-
-                        // It's likely the conflicting operation being performed by the service bus is another queue create operation
-                        // If we don't have a web response with status code 'Conflict' it's another exception
-                        if (response == null || response.StatusCode != HttpStatusCode.Conflict)
-                        {
-                            throw;
-                        }
-
-                        Trace.TraceWarning("MessagingException HttpStatusCode.Conflict - Queue likely already exists or is being created or deleted for path: {0}", this.topicName);
-                    }
+                    Trace.TraceWarning($"MessagingException HttpStatusCode.Conflict - Queue likely already exists or is being created or deleted for path: {this.topicName}");
                 }
             }
 
@@ -93,42 +84,30 @@ namespace PriorityQueue.Shared
             this.topicClient.RetryPolicy = RetryPolicy.Default;
 
             // Setup the subscription.
-            if (!string.IsNullOrEmpty(subscription))
+            if (!string.IsNullOrWhiteSpace(subscription) && !string.IsNullOrWhiteSpace(priority))
             {
-                if (!namespaceManager.SubscriptionExists(this.topicName, subscription))
+                if (!await namespaceManager.SubscriptionExistsAsync(this.topicName, subscription)
+                    .ConfigureAwait(false))
                 {
                     // Setup the filter for the subscription based on the priority.
-                    var filter = new SqlFilter("Priority = '" + priority + "'");
                     var ruleDescription = new RuleDescription
                     {
                         Name = "PriorityFilter",
-                        Filter = filter
+                        Filter = new SqlFilter($"Priority = '{priority}'")
                     };
 
                     try
                     {
-                        namespaceManager.CreateSubscription(this.topicName, subscription, ruleDescription);
+                        await namespaceManager.CreateSubscriptionAsync(this.topicName, subscription, ruleDescription)
+                            .ConfigureAwait(false);
                     }
                     catch (MessagingEntityAlreadyExistsException)
                     {
-                        Trace.TraceInformation("Messaging entity already created: " + subscription);
+                        Trace.TraceInformation($"Messaging entity already created: {subscription}");
                     }
-                    catch (MessagingException ex)
+                    catch (MessagingException ex) when (((ex.InnerException as WebException)?.Response as HttpWebResponse)?.StatusCode == HttpStatusCode.Conflict)
                     {
-                        var webException = ex.InnerException as WebException;
-                        if (webException != null)
-                        {
-                            var response = webException.Response as HttpWebResponse;
-
-                            // It's likely the conflicting operation being performed by the service bus is another queue create operation
-                            // If we don't have a web response with status code 'Conflict' it's another exception
-                            if (response == null || response.StatusCode != HttpStatusCode.Conflict)
-                            {
-                                throw;
-                            }
-
-                            Trace.TraceWarning("MessagingException HttpStatusCode.Conflict - subscription likely already exists or is being created or deleted for path: {0}", subscription);
-                        }
+                        Trace.TraceWarning($"MessagingException HttpStatusCode.Conflict - subscription likely already exists or is being created or deleted for path: {subscription}");
                     }
                 }
 
@@ -137,50 +116,26 @@ namespace PriorityQueue.Shared
             }
         }
 
-        public void SetupTopic()
+        public async Task StopReceiverAsync()
         {
-            this.Setup(subscription: null, priority: null);
-        }
-
-        public async Task StopReceiver(TimeSpan waitTime)
-        {
-           // Pause the processing threads
-            this.pauseProcessingEvent.Reset();
-
-            // There is no clean approach to wait for the threads to complete processing.
-            // We simply stop any new processing, wait for existing thread to complete, then close the message pump and then return
-            Thread.Sleep(waitTime);
-
-            await this.subscriptionClient.CloseAsync();
+            await this.subscriptionClient.CloseAsync()
+                .ConfigureAwait(false);
 
             var manager = NamespaceManager.CreateFromConnectionString(this.serviceBusConnectionString);
 
-            if (await manager.TopicExistsAsync(this.topicName))
+            if (!await manager.TopicExistsAsync(this.topicName)
+                .ConfigureAwait(false))
             {
                 try
                 {
-                    await manager.DeleteTopicAsync(this.topicName);
+                    await manager.DeleteTopicAsync(this.topicName)
+                        .ConfigureAwait(false);
                 }
                 catch (MessagingEntityNotFoundException)
                 {
                     Trace.TraceWarning(
-                        "MessagingEntityNotFoundException Deleting Topic - Topic does not exist at path: {0}", this.topicName);
+                        $"MessagingEntityNotFoundException Deleting Topic - Topic does not exist at path: {this.topicName}");
                 }
-            }
-        }
-
-        public async Task StopSender()
-        {
-            await this.topicClient.CloseAsync();
-        }
-
-        private void OptionsOnExceptionReceived(object sender, ExceptionReceivedEventArgs exceptionReceivedEventArgs)
-        {
-            var exceptionMessage = "null";
-            if (exceptionReceivedEventArgs != null && exceptionReceivedEventArgs.Exception != null)
-            {
-                exceptionMessage = exceptionReceivedEventArgs.Exception.Message;
-                Trace.TraceError("Exception in QueueClient.ExceptionReceived: {0}", exceptionMessage);
             }
         }
     }
