@@ -49,7 +49,8 @@ namespace PipeFilterB.Fabric
                Constants.QueueBPath,
                Constants.QueueFinalPath);
 
-            this.pipeFilterB.Start();
+            await this.pipeFilterB.StartAsync()
+                .ConfigureAwait(false);
 
             this.pipeFilterB.OnPipeFilterMessageAsync(async (msg) =>
             {
@@ -58,21 +59,21 @@ namespace PipeFilterB.Fabric
                 var newMsg = msg.Clone();
 
                 // DOING SOME FILTER B WORK
-                await Task.Delay(500);
+                await Task.Delay(500)
+                    .ConfigureAwait(false);
 
-                Trace.TraceInformation("Filter B processed message:{0} at {1}", msg.MessageId, DateTime.UtcNow);
+                Trace.TraceInformation($"Filter B processed message:{msg.MessageId} at {DateTime.UtcNow}");
 
                 newMsg.Properties.Add(Constants.FilterBMessageKey, "Complete");
 
                 return newMsg;
-            });
+            }, cancellationToken);
 
-            cancellationToken.WaitHandle.WaitOne();
-
-            // We will wait 10 seconds for our processing of the message to complete
-            if (this.pipeFilterB != null)
+            if (cancellationToken.WaitHandle.WaitOne())
             {
-                await this.pipeFilterB.Close(TimeSpan.FromSeconds(10));
+                // We will wait 10 seconds for our processing of the message to complete
+                await this.pipeFilterB.CloseAsync()
+                    .ConfigureAwait(false);
             }
         }
     }

@@ -25,7 +25,7 @@ namespace PipeFilterB
                Constants.QueueBPath,
                Constants.QueueFinalPath);
 
-            this.pipeFilterB.Start();
+            this.pipeFilterB.StartAsync().Wait();
 
             // For information on handling configuration changes
             // see the MSDN topic at http://go.microsoft.com/fwlink/?LinkId=166357.
@@ -48,7 +48,7 @@ namespace PipeFilterB
                 newMsg.Properties.Add(Constants.FilterBMessageKey, "Complete");
 
                 return newMsg;
-            });
+            }, CancellationToken.None);
 
             this.stopRunningEvent.WaitOne();
         }
@@ -58,7 +58,7 @@ namespace PipeFilterB
             // We will wait 10 seconds for our processing of the message to complete
             if (this.pipeFilterB != null)
             {
-                this.pipeFilterB.Close(TimeSpan.FromSeconds(10)).Wait();
+                this.pipeFilterB.CloseAsync().Wait();
             }
 
             // Signal the Run() loop to exit.

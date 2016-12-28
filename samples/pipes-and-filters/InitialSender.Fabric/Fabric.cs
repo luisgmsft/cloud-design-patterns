@@ -47,9 +47,10 @@ namespace InitialSender.Fabric
             string connectionString = parameters["ServiceBus.ConnectionString"]?.Value;
 
             this.queueManager = new QueueManager(Constants.QueueAPath, connectionString);
-            await this.queueManager.Start();
+            await this.queueManager.StartAsync()
+                .ConfigureAwait(false);
 
-            do
+            while (!cancellationToken.IsCancellationRequested)
             {
                 try
                 {
@@ -66,28 +67,32 @@ namespace InitialSender.Fabric
                         MessageId = msg.Id
                     };
 
-                    Trace.TraceInformation("New message sent:{0} at {1}", msg.Id, DateTime.UtcNow);
+                    Trace.TraceInformation($"New message sent:{msg.Id} at {DateTime.UtcNow}");
 
-                    this.queueManager.SendMessageAsync(brokeredMessage).Wait();
+                    await this.queueManager.SendMessageAsync(brokeredMessage)
+                        .ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
                     // We could check an exception count here and at some point choose to bubble this up for a role instance reset
-                    Trace.TraceError("Exception in initial sender: {0}", ex.Message);
+                    Trace.TraceError($"Exception in initial sender: {ex.Message}");
 
                     // Avoid the situation where a configuration error or some other long term exception causes us to fill up the logs
-                    Thread.Sleep(TimeSpan.FromSeconds(30));
+                    await Task.Delay(TimeSpan.FromSeconds(30))
+                        .ConfigureAwait(false);
                 }
 
                 // Continue processing while we are not signaled.
-                await Task.Delay(TimeSpan.FromSeconds(60));
+                await Task.Delay(TimeSpan.FromSeconds(60))
+                    .ConfigureAwait(false);
             }
-            while (!cancellationToken.IsCancellationRequested);
 
-            // Stop the queue and cleanup.
-            await this.queueManager.Stop();
-
-            cancellationToken.WaitHandle.WaitOne(TimeSpan.FromMinutes(5));
+            if (cancellationToken.WaitHandle.WaitOne())
+            {
+                // Stop the queue and cleanup.
+                await this.queueManager.StopAsync()
+                    .ConfigureAwait(false);
+            }
         }
     }
 }

@@ -25,7 +25,7 @@ namespace PipeFilterA
                Constants.QueueAPath,
                Constants.QueueBPath);
 
-            this.pipeFilterA.Start();
+            this.pipeFilterA.StartAsync().Wait();
 
             // For information on handling configuration changes
             // see the MSDN topic at http://go.microsoft.com/fwlink/?LinkId=166357.
@@ -41,14 +41,15 @@ namespace PipeFilterA
                 var newMsg = msg.Clone();
 
                 // DOING WORK
-                await Task.Delay(500); 
+                await Task.Delay(500)
+                    .ConfigureAwait(false); 
 
                 Trace.TraceInformation("Fitler A processed message:{0} at {1}", msg.MessageId, DateTime.UtcNow);
 
                 newMsg.Properties.Add(Constants.FilterAMessageKey, "Complete");
 
                 return newMsg;
-            });
+            }, CancellationToken.None);
 
             this.stopRunningEvent.WaitOne();
         }
@@ -58,7 +59,7 @@ namespace PipeFilterA
             // We will wait 10 seconds for our processing of the message to complete
             if (null != this.pipeFilterA)
             {
-                this.pipeFilterA.Close(TimeSpan.FromSeconds(10)).Wait();
+                this.pipeFilterA.CloseAsync().Wait();
             }
 
             // Signal the Run() loop to exit.
