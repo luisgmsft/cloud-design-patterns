@@ -24,7 +24,7 @@ namespace InitialSender
             ServicePointManager.DefaultConnectionLimit = 12;
 
             this.queueManager = new QueueManager(Constants.QueueAPath, Settings.ServiceBusConnectionString);
-            this.queueManager.Start().Wait();
+            this.queueManager.StartAsync().Wait();
 
             // For information on handling configuration changes
             // see the MSDN topic at http://go.microsoft.com/fwlink/?LinkId=166357.
@@ -74,7 +74,7 @@ namespace InitialSender
         public override void OnStop()
         {
             // Stop the queue and cleanup.
-            this.queueManager.Stop().Wait();
+            this.queueManager.StopAsync().Wait();
 
             // Signal the Run() loop to exit.
             this.stopRunningEvent.Set();

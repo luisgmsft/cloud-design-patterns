@@ -25,7 +25,7 @@ namespace FinalReceiver
 
             // Setup the queue.
             this.queueFinal = new ServiceBusPipeFilter(Settings.ServiceBusConnectionString, Constants.QueueFinalPath);
-            this.queueFinal.Start();
+            this.queueFinal.StartAsync().Wait();
 
             // For information on handling configuration changes
             // see the MSDN topic at http://go.microsoft.com/fwlink/?LinkId=166357.
@@ -46,7 +46,7 @@ namespace FinalReceiver
                         msg.Properties[Constants.FilterBMessageKey]);
 
                     return null;
-                });
+                }, CancellationToken.None);
 
             // Wait for a stop event to move on
             this.stopRunningEvent.WaitOne();
@@ -57,7 +57,7 @@ namespace FinalReceiver
             // Close the Queue message pump
             if (this.queueFinal != null)
             {
-                this.queueFinal.Close(TimeSpan.FromSeconds(30)).Wait();
+                this.queueFinal.CloseAsync().Wait();
             }
             
             // Signal the Run() loop to exit.

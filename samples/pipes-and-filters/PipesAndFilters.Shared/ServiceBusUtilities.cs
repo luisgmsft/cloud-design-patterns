@@ -2,7 +2,9 @@
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 namespace PipesAndFilters.Shared
 {
+    using System;
     using System.Diagnostics;
+    using System.Globalization;
     using System.Net;
     using System.Threading.Tasks;
     using Microsoft.ServiceBus;
@@ -12,35 +14,51 @@ namespace PipesAndFilters.Shared
     {
         public static async Task CreateQueueIfNotExistsAsync(string connectionString, string path)
         {
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                throw new ArgumentException($"{nameof(connectionString)} cannot be null, empty, or only whitespace");
+            }
+
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new ArgumentException($"{nameof(path)} cannot be null, empty, or only whitespace");
+            }
+
+            await CreateQueueIfNotExistsAsync(connectionString, new QueueDescription(path))
+                .ConfigureAwait(false);
+        }
+
+        public static async Task CreateQueueIfNotExistsAsync(string connectionString, QueueDescription queueDescription)
+        {
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                throw new ArgumentException($"{nameof(connectionString)} cannot be null, empty, or only whitespace");
+            }
+
+            if (queueDescription == null)
+            {
+                throw new ArgumentNullException(nameof(queueDescription));
+            }
+
             var namespaceManager = NamespaceManager.CreateFromConnectionString(connectionString);
 
-            if (!await namespaceManager.QueueExistsAsync(path))
+            if (!await namespaceManager.QueueExistsAsync(queueDescription.Path)
+                .ConfigureAwait(false))
             {
                 try
                 {
-                    await namespaceManager.CreateQueueAsync(path);
+                    await namespaceManager.CreateQueueAsync(queueDescription)
+                        .ConfigureAwait(false);
                 }
                 catch (MessagingEntityAlreadyExistsException)
                 {
                     Trace.TraceWarning(
-                        "MessagingEntityAlreadyExistsException Creating Queue - Queue likely already exists for path: {0}", path);
+                        $"MessagingEntityAlreadyExistsException Creating Queue - Queue likely already exists for path: {queueDescription.Path}");
                 }
-                catch (MessagingException ex)
+                catch (MessagingException ex) when (((ex.InnerException as WebException)?.Response as HttpWebResponse)?.StatusCode == HttpStatusCode.Conflict)
                 {
-                    var webException = ex.InnerException as WebException;
-                    if (webException != null)
-                    {
-                        var response = webException.Response as HttpWebResponse;
-
-                        // It's likely the conflicting operation being performed by the service bus is another queue create operation
-                        // If we don't have a web response with status code 'Conflict' it's another exception
-                        if (response == null || response.StatusCode != HttpStatusCode.Conflict)
-                        {
-                            throw;
-                        }
-
-                        Trace.TraceWarning("MessagingException HttpStatusCode.Conflict - Queue likely already exists or is being created or deleted for path: {0}", path);
-                    }
+                    Trace.TraceWarning(
+                        $"MessagingException HttpStatusCode.Conflict - Queue likely already exists or is being created or deleted for path: {queueDescription.Path}");
                 }
             }
         }
@@ -49,16 +67,18 @@ namespace PipesAndFilters.Shared
         {
             var namespaceManager = NamespaceManager.CreateFromConnectionString(connectionString);
 
-            if (await namespaceManager.QueueExistsAsync(path))
+            if (await namespaceManager.QueueExistsAsync(path)
+                .ConfigureAwait(false))
             {
                 try
                 {
-                    await namespaceManager.DeleteQueueAsync(path);
+                    await namespaceManager.DeleteQueueAsync(path)
+                        .ConfigureAwait(false);
                 }
                 catch (MessagingEntityNotFoundException)
                 {
                     Trace.TraceWarning(
-                        "MessagingEntityNotFoundException Deleting Queue - Queue does not exist at path: {0}", path);
+                        $"MessagingEntityNotFoundException Deleting Queue - Queue does not exist at path: {path}");
                 }
             }
         }

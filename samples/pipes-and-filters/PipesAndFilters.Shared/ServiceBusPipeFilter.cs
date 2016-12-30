@@ -27,27 +27,28 @@ namespace PipesAndFilters.Shared
             this.outQueuePath = outQueuePath;
         }
 
-        public void Start()
+        private void OptionsOnExceptionReceived(object sender, ExceptionReceivedEventArgs exceptionReceivedEventArgs) =>
+            Trace.TraceError($"Exception in QueueClient.ExceptionReceived: {exceptionReceivedEventArgs?.Exception?.Message}");
+
+        public async Task StartAsync()
         {
             // Create the inbound filter queue if it does not exist
-            var createInQueueTask = ServiceBusUtilities.CreateQueueIfNotExistsAsync(this.connectionString, this.inQueuePath);
+            await ServiceBusUtilities.CreateQueueIfNotExistsAsync(this.connectionString, this.inQueuePath)
+                .ConfigureAwait(false);
+            this.inQueue = QueueClient.CreateFromConnectionString(this.connectionString, this.inQueuePath);
 
             // Create the outbound filter queue if it does not exist
-            if(!string.IsNullOrEmpty(outQueuePath))
+            if (!string.IsNullOrWhiteSpace(outQueuePath))
             {
-                ServiceBusUtilities.CreateQueueIfNotExistsAsync(this.connectionString, this.outQueuePath).Wait();
+                await ServiceBusUtilities.CreateQueueIfNotExistsAsync(this.connectionString, this.outQueuePath)
+                    .ConfigureAwait(false);
 
                 this.outQueue = QueueClient.CreateFromConnectionString(this.connectionString, this.outQueuePath);
             }
-
-            // Wait for queue creations to complete
-            createInQueueTask.Wait();
-
-            // Create inbound and outbound queue clients
-            this.inQueue = QueueClient.CreateFromConnectionString(this.connectionString, this.inQueuePath);
         }
 
-        public void OnPipeFilterMessageAsync(Func<BrokeredMessage, Task<BrokeredMessage>> asyncFilterTask, int maxConcurrentCalls = 1)
+        public void OnPipeFilterMessageAsync(Func<BrokeredMessage, Task<BrokeredMessage>> asyncFilterTask,
+            CancellationToken cancellationToken, int maxConcurrentCalls = 1)
         {
             var options = new OnMessageOptions()
             {
@@ -60,57 +61,48 @@ namespace PipesAndFilters.Shared
             this.inQueue.OnMessageAsync(
                 async (msg) =>
             {
-                pauseProcessingEvent.WaitOne();
-
-                // Perform a simple check to dead letter potential poison messages.
-                //  If we have dequeued the message more than the max count we can assume the message is poison and deadletter it.
-                if (msg.DeliveryCount > Constants.MaxServiceBusDeliveryCount)
+                if (!cancellationToken.IsCancellationRequested)
                 {
-                    await msg.DeadLetterAsync();
 
-                    Trace.TraceWarning("Maximum Message Count Exceeded: {0} for MessageID: {1} ", Constants.MaxServiceBusDeliveryCount, msg.MessageId);
+                    // Perform a simple check to dead letter potential poison messages.
+                    //  If we have dequeued the message more than the max count we can assume the message is poison and deadletter it.
+                    if (msg.DeliveryCount > Constants.MaxServiceBusDeliveryCount)
+                    {
+                        await msg.DeadLetterAsync()
+                            .ConfigureAwait(false);
 
-                    return;
+                        Trace.TraceWarning($"Maximum Message Count Exceeded: {Constants.MaxServiceBusDeliveryCount} for MessageID: {msg.MessageId}");
+
+                        return;
+                    }
+
+                    // Process the filter and send the output to the next queue in the pipeline
+                    var outMessage = await asyncFilterTask(msg)
+                        .ConfigureAwait(false);
+
+                    // Send the message from the filter processor to the next queue in the pipeline
+                    if (outQueue != null)
+                    {
+                        await outQueue.SendAsync(outMessage)
+                            .ConfigureAwait(false);
+                    }
+
+                    //// Note: There is a chance we could send the same message twice or that a message may be processed by an upstream or downstream filter at the same time.
+                    ////       This would happen in a situation where we completed processing of a message, sent it to the next pipe/queue, and then failed to Complete it when using PeakLock
+                    ////       Idempotent message processing and concurrency should be considered in the implementation.
                 }
-
-                // Process the filter and send the output to the next queue in the pipeline
-                var outMessage = await asyncFilterTask(msg);
-
-                // Send the message from the filter processor to the next queue in the pipeline
-                if (outQueue != null)
-                {
-                    await outQueue.SendAsync(outMessage);
-                }
-
-                //// Note: There is a chance we could send the same message twice or that a message may be processed by an upstream or downstream filter at the same time.
-                ////       This would happen in a situation where we completed processing of a message, sent it to the next pipe/queue, and then failed to Complete it when using PeakLock
-                ////       Idempotent message processing and concurrency should be considered in the implementation.
             },
             options);
         }
 
-        public async Task Close(TimeSpan timespan)
+        public async Task CloseAsync()
         {
-            // Pause the processing threads
-            this.pauseProcessingEvent.Reset();
-
-            // There is no clean approach to wait for the threads to complete processing.
-            //  We simply stop any new processing, wait for existing thread to complete, then close the message pump and then return
-            Thread.Sleep(timespan);
-
-            this.inQueue.Close();
+            await this.inQueue.CloseAsync()
+                .ConfigureAwait(false);
 
             // Cleanup resources.
-            await ServiceBusUtilities.DeleteQueueIfExistsAsync(Settings.ServiceBusConnectionString, this.inQueue.Path);
-        }
-
-        private void OptionsOnExceptionReceived(object sender, ExceptionReceivedEventArgs exceptionReceivedEventArgs)
-        {
-            //There is currently an issue in the Service Bus SDK that raises a null exception
-            if (exceptionReceivedEventArgs.Exception != null)
-            {
-                Trace.TraceError("Exception in QueueClient.ExceptionReceived: {0}", exceptionReceivedEventArgs.Exception.Message);
-            }
+            await ServiceBusUtilities.DeleteQueueIfExistsAsync(Settings.ServiceBusConnectionString, this.inQueue.Path)
+                .ConfigureAwait(false);
         }
     }
 }

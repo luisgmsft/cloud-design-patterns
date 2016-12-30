@@ -47,23 +47,27 @@ namespace FinalReceiver.Fabric
 
             // Setup the queue.
             this.queueFinal = new ServiceBusPipeFilter(connectionString, Constants.QueueFinalPath);
-            this.queueFinal.Start();
+            await this.queueFinal.StartAsync()
+                .ConfigureAwait(false);
 
             this.queueFinal.OnPipeFilterMessageAsync(
                 async (msg) =>
                 {
-                    await Task.Delay(500); // DOING WORK
+                    await Task.Delay(500)
+                        .ConfigureAwait(false); // DOING WORK
 
                     // The pipeline message was received.
                     Trace.TraceInformation(
-                        "Pipeline Message Complete - FilterA:{0} FilterB:{1}",
-                        msg.Properties[Constants.FilterAMessageKey],
-                        msg.Properties[Constants.FilterBMessageKey]);
+                        $"Pipeline Message Complete - FilterA:{msg.Properties[Constants.FilterAMessageKey]} FilterB:{msg.Properties[Constants.FilterBMessageKey]}");
 
                     return null;
-                });
+                }, cancellationToken);
 
-            cancellationToken.WaitHandle.WaitOne();
+            if (cancellationToken.WaitHandle.WaitOne())
+            {
+                await this.queueFinal.CloseAsync()
+                    .ConfigureAwait(false);
+            }
         }
     }
 }
