@@ -9,6 +9,7 @@ using System.Collections.ObjectModel;
 using System.Fabric.Description;
 using Microsoft.ServiceBus.Messaging;
 using System.Diagnostics;
+using System.Linq;
 
 namespace PriorityQueue.Sender.Fabric
 {
@@ -41,60 +42,64 @@ namespace PriorityQueue.Sender.Fabric
             var topicName = parameters["TopicName"]?.Value;
 
             this.queueManager = new QueueManager(serviceBusConnectionString, topicName);
-            this.queueManager.SetupTopic();
+            await this.queueManager.SetupTopicAsync()
+                .ConfigureAwait(false);
 
             //Test message send loop
-            do
+            while (!cancellationToken.IsCancellationRequested)
             {
                 try
                 {
                     // Send a low priority batch
-                    var lowMessages = new List<BrokeredMessage>();
-
-                    for (int i = 0; i < 10; i++)
-                    {
-                        var message = new BrokeredMessage() { MessageId = Guid.NewGuid().ToString() };
-                        message.Properties["Priority"] = Priority.Low;
-                        lowMessages.Add(message);
-                    }
-
-                    await this.queueManager.SendBatchAsync(lowMessages);
-                    Trace.TraceInformation("Sent low priority message batch: " + this.Context.NodeContext.NodeId.ToString());
+                    var lowMessages = Enumerable.Range(0, 10)
+                        .Select(i =>
+                        {
+                            var message = new BrokeredMessage()
+                            {
+                                MessageId = Guid.NewGuid().ToString()
+                            };
+                            message.Properties["Priority"] = Priority.Low;
+                            return message;
+                        }).ToList();
+                    await this.queueManager.SendBatchAsync(lowMessages)
+                        .ConfigureAwait(false);
+                    Trace.TraceInformation($"Sent low priority message batch: {this.Context.NodeContext.NodeId.ToString()}");
 
                     // Send a high priority batch
-                    var highMessages = new List<BrokeredMessage>();
+                    var highMessages = Enumerable.Range(0, 10)
+                        .Select(i =>
+                        {
+                            var message = new BrokeredMessage()
+                            {
+                                MessageId = Guid.NewGuid().ToString()
+                            };
+                            message.Properties["Priority"] = Priority.High;
+                            return message;
+                        }).ToList();
 
-                    for (int i = 0; i < 10; i++)
-                    {
-                        var message = new BrokeredMessage() { MessageId = Guid.NewGuid().ToString() };
-                        message.Properties["Priority"] = Priority.High;
-                        highMessages.Add(message);
-                    }
-
-                    await this.queueManager.SendBatchAsync(highMessages);
-                    Trace.TraceInformation("Sent high priority message batch: " + this.Context.NodeContext.NodeId.ToString());
+                    await this.queueManager.SendBatchAsync(highMessages)
+                        .ConfigureAwait(false);
+                    Trace.TraceInformation($"Sent high priority message batch: {this.Context.NodeContext.NodeId.ToString()}");
                 }
                 catch (Exception ex)
                 {
                     // We could check an exception count here and at some point choose to bubble this up for a role instance reset
                     //  If for example we have bad configuration or somethign that we cannot recover from we may raise it to the role instance
-                    Trace.TraceError("Exception in initial sender: {0}", ex.Message);
+                    Trace.TraceError($"Exception in initial sender: {ex.Message}");
 
                     // Avoid the situation where a configuration error or some other long term exception causes us to fill up the logs
-                    Thread.Sleep(TimeSpan.FromSeconds(30));
+                    await Task.Delay(TimeSpan.FromSeconds(30))
+                        .ConfigureAwait(false);
                 }
-
-                // Continue processing while we are not signaled.
             }
 
-            //Use this instead of sleeping so we can signal a stop while waiting
-            while (!cancellationToken.IsCancellationRequested);
-
-            // Stop the sender.
-            await this.queueManager.StopSender();
-
             // Wait for the Run() loop to complete it's current operation and exit
-            cancellationToken.WaitHandle.WaitOne(TimeSpan.FromMinutes(5));
+            if (cancellationToken.WaitHandle.WaitOne())
+            {
+                // Stop the sender.
+                await this.queueManager.StopSenderAsync()
+                    .ConfigureAwait(false);
+            }
         }
     }
 }

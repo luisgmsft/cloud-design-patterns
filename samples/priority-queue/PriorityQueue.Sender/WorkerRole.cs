@@ -76,7 +76,7 @@ namespace PriorityQueue.Sender
             var topicName = CloudConfigurationManager.GetSetting("TopicName");
 
             this.queueManager = new QueueManager(serviceBusConnectionString, topicName);
-            this.queueManager.SetupTopic();
+            this.queueManager.SetupTopicAsync().Wait();
 
             return base.OnStart();
         }
@@ -87,7 +87,7 @@ namespace PriorityQueue.Sender
             this.stopRunningEvent.Set();
 
             // Stop the sender.
-            this.queueManager.StopSender().Wait();
+            this.queueManager.StopSenderAsync().Wait();
 
             // Wait for the Run() loop to complete it's current operation and exit
             this.exitingRunEvent.WaitOne(TimeSpan.FromMinutes(5));

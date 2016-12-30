@@ -19,7 +19,7 @@ namespace PriorityQueue.Shared
         {
             // Start listening for messages on the subscription.
             var subscriptionName = CloudConfigurationManager.GetSetting("SubscriptionName");
-            this.queueManager.ReceiveMessages(subscriptionName, this.ProcessMessage);
+            this.queueManager.ReceiveMessages(subscriptionName, this.ProcessMessage, CancellationToken.None);
 
             this.completedEvent.WaitOne();
         }
@@ -37,14 +37,14 @@ namespace PriorityQueue.Shared
             this.queueManager = new QueueManager(connectionString, topicName);
 
             // create the subscriptions, one for each priority.
-            this.queueManager.Setup(subscriptionName, priority: subscriptionName);
+            this.queueManager.SetupAsync(subscriptionName, priority: subscriptionName).Wait();
 
             return base.OnStart();
         }
 
         public override void OnStop()
         {
-            this.queueManager.StopReceiver(TimeSpan.FromSeconds(30)).Wait();
+            this.queueManager.StopReceiverAsync().Wait();
 
             this.completedEvent.Set();
 

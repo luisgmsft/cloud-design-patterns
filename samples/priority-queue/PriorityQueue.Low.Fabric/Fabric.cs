@@ -21,11 +21,12 @@ namespace PriorityQueue.Low.Fabric
             : base(context)
         { }
 
-        protected override async Task ProcessMessage(BrokeredMessage message)
+        protected override async Task ProcessMessageAsync(BrokeredMessage message)
         {
             // simulate message processing for High priority messages
-            await base.ProcessMessage(message);
-            Trace.TraceInformation("Low priority message processed by " + this.Context.NodeContext.NodeId.ToString() + " MessageId: " + message.MessageId);
+            await base.ProcessMessageAsync(message)
+                .ConfigureAwait(false);
+            Trace.TraceInformation($"Low priority message processed by {this.Context.NodeContext.NodeId.ToString()} MessageId: {message.MessageId}");
         }
     }
 }

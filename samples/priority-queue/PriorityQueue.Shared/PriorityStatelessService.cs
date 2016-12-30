@@ -18,6 +18,9 @@ namespace PriorityQueue.Shared
             : base(context)
         { }
 
+        protected virtual async Task ProcessMessageAsync(BrokeredMessage message) =>
+            await Task.Delay(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+
         /// <summary>
         /// This is the main entry point for your service instance.
         /// </summary>
@@ -43,20 +46,16 @@ namespace PriorityQueue.Shared
             this.queueManager = new QueueManager(serviceBusConnectionString, topicName);
 
             // create the subscriptions, one for each priority.
-            this.queueManager.Setup(subscriptionName, priority: subscriptionName);
+            await this.queueManager.SetupAsync(subscriptionName, priority: subscriptionName)
+                .ConfigureAwait(false);
 
-            this.queueManager.ReceiveMessages(subscriptionName, this.ProcessMessage);
+            this.queueManager.ReceiveMessages(subscriptionName, this.ProcessMessageAsync, cancellationToken);
 
-            while (!cancellationToken.IsCancellationRequested)
-            { }
-
-            await this.queueManager.StopReceiver(TimeSpan.FromSeconds(30));
-        }
-
-        protected virtual async Task ProcessMessage(BrokeredMessage message)
-        {
-            // simulating processing
-            await Task.Delay(TimeSpan.FromSeconds(2));
+            if (cancellationToken.WaitHandle.WaitOne())
+            {
+                await this.queueManager.StopReceiverAsync()
+                    .ConfigureAwait(false);
+            }
         }
     }
 }
