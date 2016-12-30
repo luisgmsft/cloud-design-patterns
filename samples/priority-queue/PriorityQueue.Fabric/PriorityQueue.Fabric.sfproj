@@ -29,9 +29,9 @@
     <Content Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\PriorityQueue.High.Fabric\PriorityQueue.High.Fabric.csproj" />
-    <ProjectReference Include="..\PriorityQueue.Low.Fabric\PriorityQueue.Low.Fabric.csproj" />
-    <ProjectReference Include="..\PriorityQueue.Sender.Fabric\PriorityQueue.Sender.Fabric.csproj" />
+    <ProjectReference Include="..\PriorityQueue.High\PriorityQueue.High.csproj" />
+    <ProjectReference Include="..\PriorityQueue.Low\PriorityQueue.Low.csproj" />
+    <ProjectReference Include="..\PriorityQueue.Sender\PriorityQueue.Sender.csproj" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.Common.targets" />
   <PropertyGroup>

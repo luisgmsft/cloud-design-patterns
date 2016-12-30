@@ -29,10 +29,10 @@
     <Content Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\FinalReceiver.Fabric\FinalReceiver.Fabric.csproj" />
-    <ProjectReference Include="..\InitialSender.Fabric\InitialSender.Fabric.csproj" />
-    <ProjectReference Include="..\PipeFilterA.Fabric\PipeFilterA.Fabric.csproj" />
-    <ProjectReference Include="..\PipeFilterB.Fabric\PipeFilterB.Fabric.csproj" />
+    <ProjectReference Include="..\FinalReceiver\FinalReceiver.csproj" />
+    <ProjectReference Include="..\InitialSender\InitialSender.csproj" />
+    <ProjectReference Include="..\PipeFilterA\PipeFilterA.csproj" />
+    <ProjectReference Include="..\PipeFilterB\PipeFilterB.csproj" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.Common.targets" />
   <PropertyGroup>
